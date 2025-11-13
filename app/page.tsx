@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState, useEffect, ChangeEvent } from "react";
 
 /* ---------- Tipos ---------- */
 
@@ -24,6 +24,13 @@ type Video = {
   title: string;
   url: string;
   status: VideoStatus;
+};
+
+type Screenshot = {
+  id: string;
+  name: string;
+  dataUrl: string;
+  createdAt: string; // ISO
 };
 
 const VIDEO_STATUS_LABELS: Record<VideoStatus, string> = {
@@ -68,104 +75,13 @@ function useLocalStorage<T>(key: string, initial: T) {
   return [value, setValue] as const;
 }
 
-// exportar JSON
-function exportJSON(data: unknown) {
-  const blob = new Blob([JSON.stringify(data, null, 2)], {
-    type: "application/json",
-  });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = `diario-aprendizaje-${new Date()
-    .toISOString()
-    .slice(0, 10)}.json`;
-  a.click();
-  URL.revokeObjectURL(url);
-}
-
-// exportar Markdown
-function exportMarkdown(entries: Entry[], tasks: Task[], videos: Video[]) {
-  const now = new Date();
-  const header = `# Diario de Aprendizaje Squaads
-
-Generado: ${now.toLocaleString("es-ES")}
-
----
-
-`;
-
-  const entriesMd =
-    entries.length === 0
-      ? "_Sin entradas todavía._\n"
-      : entries
-          .slice()
-          .sort((a, b) => b.date.localeCompare(a.date))
-          .map((e) => {
-            const fecha = new Date(e.date).toLocaleDateString("es-ES");
-            const horas = e.hours ?? 0;
-            return `## ${fecha}
-
-**Horas de estudio:** ${horas}
-**Notas:**
-
-${e.notes}
-
-`;
-          })
-          .join("\n");
-
-  const tasksMd =
-    tasks.length === 0
-      ? "_Sin tareas registradas._\n"
-      : tasks
-          .map(
-            (t) =>
-              `- [${t.done ? "x" : " "}] ${t.text.trim() || "(sin descripción)"}`
-          )
-          .join("\n");
-
-  const videosMd =
-    videos.length === 0
-      ? "_Sin vídeos registrados._\n"
-      : videos
-          .map((v) => {
-            const estado = VIDEO_STATUS_LABELS[v.status];
-            const url = v.url || "(sin enlace)";
-            return `- **${v.title}**  
-  - Estado: ${estado}  
-  - Enlace: ${url}`;
-          })
-          .join("\n\n");
-
-  const full = `${header}## Entradas del diario
-
-${entriesMd}
----
-
-## Tareas
-
-${tasksMd}
-
----
-
-## Vídeos de estudio
-
-${videosMd}
-`;
-
-  const blob = new Blob([full], { type: "text/markdown" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = `diario-aprendizaje-${new Date()
-    .toISOString()
-    .slice(0, 10)}.md`;
-  a.click();
-  URL.revokeObjectURL(url);
-}
-
 // “PDF” usando la impresión del navegador (Guardar como PDF)
-function exportPDF(entries: Entry[], tasks: Task[], videos: Video[]) {
+function exportPDF(
+  entries: Entry[],
+  tasks: Task[],
+  videos: Video[],
+  screenshots: Screenshot[]
+) {
   if (typeof window === "undefined") return;
 
   const sortedEntries = entries
@@ -211,6 +127,24 @@ function exportPDF(entries: Entry[], tasks: Task[], videos: Video[]) {
             return `<li><strong>${v.title}</strong><br/>Estado: ${estado}<br/>Enlace: ${url}</li>`;
           })
           .join("")}</ul>`;
+
+  const htmlScreenshots =
+    screenshots.length === 0
+      ? "<p><em>Sin capturas registradas.</em></p>"
+      : `<div style="display:flex;flex-wrap:wrap;gap:12px;">${screenshots
+          .map(
+            (s) => `
+        <figure style="width:180px;">
+          <img src="${s.dataUrl}" alt="${s.name}" style="width:100%;height:auto;border-radius:8px;border:1px solid #e5e7eb;"/>
+          <figcaption style="font-size:11px;color:#4b5563;margin-top:4px;word-break:break-word;">
+            ${s.name}<br/>
+            <span style="font-size:10px;color:#9ca3af;">${new Date(
+              s.createdAt
+            ).toLocaleString("es-ES")}</span>
+          </figcaption>
+        </figure>`
+          )
+          .join("")}</div>`;
 
   const win = window.open("", "_blank");
   if (!win) return;
@@ -259,6 +193,9 @@ function exportPDF(entries: Entry[], tasks: Task[], videos: Video[]) {
       <hr />
       <h2>Vídeos de estudio</h2>
       ${htmlVideos}
+      <hr />
+      <h2>Capturas de pantalla</h2>
+      ${htmlScreenshots}
       <script>
         window.onload = function () {
           window.print();
@@ -284,7 +221,7 @@ export default function Home() {
   );
   const [newTaskText, setNewTaskText] = useState("");
 
-  // entradas del diario
+  // entradas del diario (tipo blog)
   const [entries, setEntries] = useLocalStorage<Entry[]>(
     "aprendizaje-squaads-entries",
     []
@@ -302,26 +239,14 @@ export default function Home() {
   const [videoUrl, setVideoUrl] = useState("");
   const [videoStatus, setVideoStatus] = useState<VideoStatus>("to_watch");
 
+  // capturas
+  const [screenshots, setScreenshots] = useLocalStorage<Screenshot[]>(
+    "aprendizaje-squaads-screenshots",
+    []
+  );
+
   const completedTasks = tasks.filter((t) => t.done).length;
-  const pendingTasks = tasks.length - completedTasks;
   const totalHours = entries.reduce((sum, e) => sum + (e.hours ?? 0), 0);
-
-  /* ----- cuando cambias de fecha, cargamos / limpiamos la entrada ----- */
-
-  useEffect(() => {
-    const entryForDay = entries.find((e) => e.date === selectedDate);
-    if (entryForDay) {
-      setEntryText(entryForDay.notes);
-      setEntryHours(
-        entryForDay.hours != null && entryForDay.hours !== 0
-          ? String(entryForDay.hours)
-          : ""
-      );
-    } else {
-      setEntryText("");
-      setEntryHours("");
-    }
-  }, [selectedDate, entries]);
 
   /* ----- acciones tareas ----- */
 
@@ -343,26 +268,31 @@ export default function Home() {
     setTasks((prev) => prev.filter((t) => t.id !== id));
   }
 
-  /* ----- acciones diario ----- */
+  /* ----- acciones diario (blog) ----- */
 
   function saveEntry() {
     const notes = entryText.trim();
-    if (!notes && !entryHours.trim()) return;
-  
+    const hoursStr = entryHours.trim();
+
+    if (!notes && !hoursStr) return;
+
     const hoursRaw = entryHours.replace(",", ".").trim();
     const h = Number(hoursRaw);
     const safeHours = !hoursRaw ? 0 : isNaN(h) || h < 0 ? 0 : h;
-  
+
     const newEntry: Entry = {
-      id: createId(),          // SIEMPRE id nuevo
-      date: selectedDate,      // misma fecha, si quieres
+      id: createId(), // siempre nueva entrada, aunque sea mismo día
+      date: selectedDate,
       notes,
       hours: safeHours,
     };
-  
+
     setEntries((prev) => [newEntry, ...prev]);
+
+    // limpiar formulario para que cada entrada sea independiente
+    setEntryText("");
+    setEntryHours("");
   }
-  
 
   function deleteEntry(id: string) {
     setEntries((prev) => prev.filter((e) => e.id !== id));
@@ -401,6 +331,37 @@ export default function Home() {
     setVideos((prev) => prev.filter((v) => v.id !== id));
   }
 
+  /* ----- acciones capturas ----- */
+
+  function handleScreenshotChange(e: ChangeEvent<HTMLInputElement>) {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+
+    Array.from(files).forEach((file) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const result = reader.result;
+        if (typeof result === "string") {
+          const newScreenshot: Screenshot = {
+            id: createId(),
+            name: file.name,
+            dataUrl: result,
+            createdAt: new Date().toISOString(),
+          };
+          setScreenshots((prev) => [newScreenshot, ...prev]);
+        }
+      };
+      reader.readAsDataURL(file);
+    });
+
+    // permitir volver a seleccionar el mismo archivo
+    e.target.value = "";
+  }
+
+  function deleteScreenshot(id: string) {
+    setScreenshots((prev) => prev.filter((s) => s.id !== id));
+  }
+
   /* ---------- UI ---------- */
 
   return (
@@ -417,8 +378,8 @@ export default function Home() {
                 Diario de Aprendizaje
               </h1>
               <p className="mt-2 text-sm text-slate-300">
-                Registra lo que estudias, marca tus objetivos y lleva control de
-                los vídeos que vas dominando.
+                Tu blog personal de estudio: notas, tareas, vídeos y capturas en
+                un solo lugar.
               </p>
             </div>
 
@@ -450,26 +411,9 @@ export default function Home() {
 
               <div className="flex flex-wrap gap-2 justify-end">
                 <button
-                  onClick={() => exportMarkdown(entries, tasks, videos)}
-                  className="rounded-2xl border border-slate-700 bg-slate-900/80 px-3 py-2 text-xs font-medium text-slate-100 hover:border-sky-400 hover:text-sky-200 transition"
-                >
-                  Exportar Markdown
-                </button>
-                <button
                   onClick={() =>
-                    exportJSON({
-                      entries,
-                      tasks,
-                      videos,
-                      exportedAt: new Date().toISOString(),
-                    })
+                    exportPDF(entries, tasks, videos, screenshots)
                   }
-                  className="rounded-2xl border border-slate-700 bg-slate-900/80 px-3 py-2 text-xs font-medium text-slate-100 hover:border-emerald-400 hover:text-emerald-200 transition"
-                >
-                  Exportar JSON
-                </button>
-                <button
-                  onClick={() => exportPDF(entries, tasks, videos)}
                   className="rounded-2xl border border-slate-700 bg-slate-900/80 px-3 py-2 text-xs font-medium text-slate-100 hover:border-fuchsia-400 hover:text-fuchsia-200 transition"
                 >
                   Exportar PDF
@@ -480,16 +424,16 @@ export default function Home() {
         </header>
 
         <div className="grid gap-6 lg:grid-cols-[1.5fr,1.1fr]">
-          {/* Columna izquierda: diario + vídeos */}
+          {/* Columna izquierda: diario + vídeos + capturas */}
           <div className="space-y-6">
-            {/* Diario del día */}
+            {/* Entrada del día */}
             <section className="rounded-3xl border border-slate-800 bg-slate-900/70 p-5 shadow-[0_18px_35px_rgba(15,23,42,0.9)]">
               <div className="flex items-center justify-between gap-2 mb-3">
                 <h2 className="text-lg font-semibold text-slate-50">
-                  Entrada del día ✍️
+                  Nueva entrada ✍️
                 </h2>
                 <span className="rounded-full border border-slate-700 bg-slate-800/70 px-3 py-1 text-[11px] font-medium uppercase tracking-wide text-slate-300">
-                  Reflect &amp; Learn
+                  Blog de estudio
                 </span>
               </div>
 
@@ -520,7 +464,7 @@ export default function Home() {
 
               <textarea
                 className="w-full rounded-2xl border border-slate-700 bg-slate-950/60 p-3 text-sm text-slate-100 shadow-inner outline-none transition focus:border-sky-400 focus:ring-2 focus:ring-sky-500/60 min-h-[120px]"
-                placeholder="Ejemplo: practiqué Node.js, hice un pequeño proyecto, repasé promesas y async/await..."
+                placeholder="Cuenta qué has aprendido hoy, qué te ha costado, qué te ha salido bien..."
                 value={entryText}
                 onChange={(e) => setEntryText(e.target.value)}
               />
@@ -534,11 +478,11 @@ export default function Home() {
               </div>
             </section>
 
-            {/* Historial de entradas */}
+            {/* Historial de entradas (tipo blog) */}
             <section className="rounded-3xl border border-slate-800 bg-slate-900/70 p-5 shadow-[0_18px_35px_rgba(15,23,42,0.9)]">
               <div className="flex items-center justify-between mb-3">
                 <h2 className="text-lg font-semibold text-slate-50">
-                  Historial de días 📚
+                  Entradas anteriores 📚
                 </h2>
                 <span className="text-[11px] text-slate-400">
                   {entries.length} entrada(s)
@@ -546,8 +490,8 @@ export default function Home() {
               </div>
               {entries.length === 0 ? (
                 <p className="text-sm text-slate-400">
-                  Aún no tienes entradas guardadas. Escribe algo en “Entrada del
-                  día” y pulsa en <span className="font-semibold">Guardar</span>.
+                  Aún no tienes entradas guardadas. Escribe algo arriba y pulsa{" "}
+                  <span className="font-semibold">Guardar entrada</span>.
                 </p>
               ) : (
                 <div className="space-y-3 max-h-[260px] overflow-y-auto pr-1">
@@ -555,33 +499,30 @@ export default function Home() {
                     .slice()
                     .sort((a, b) => b.date.localeCompare(a.date))
                     .map((entry) => (
-                      <div
+                      <article
                         key={entry.id}
                         className="group rounded-2xl border border-slate-800 bg-slate-950/60 p-3 text-sm transition hover:border-sky-500/70 hover:bg-slate-900/90"
                       >
                         <div className="flex items-center justify-between mb-1">
-                          <button
-                            onClick={() => setSelectedDate(entry.date)}
-                            className="text-xs font-semibold text-sky-300 hover:underline"
-                          >
-                            {new Date(entry.date).toLocaleDateString("es-ES")}
-                          </button>
-                          <div className="flex items-center gap-3">
+                          <div className="flex flex-col">
+                            <span className="text-xs font-semibold text-sky-300">
+                              {new Date(entry.date).toLocaleDateString("es-ES")}
+                            </span>
                             <span className="text-[11px] text-emerald-300">
                               {(entry.hours ?? 0).toFixed(1)} h
                             </span>
-                            <button
-                              onClick={() => deleteEntry(entry.id)}
-                              className="text-[11px] text-slate-400 hover:text-red-400 transition"
-                            >
-                              Borrar
-                            </button>
                           </div>
+                          <button
+                            onClick={() => deleteEntry(entry.id)}
+                            className="text-[11px] text-slate-400 hover:text-red-400 transition"
+                          >
+                            Borrar
+                          </button>
                         </div>
                         <p className="whitespace-pre-wrap text-slate-100 text-xs sm:text-sm">
                           {entry.notes}
                         </p>
-                      </div>
+                      </article>
                     ))}
                 </div>
               )}
@@ -642,8 +583,7 @@ export default function Home() {
               {/* Lista de vídeos */}
               {videos.length === 0 ? (
                 <p className="text-sm text-slate-400">
-                  Aquí podrás ir apuntando los vídeos que te recomienda la
-                  empresa o que tú quieres ver y dominar.
+                  Aquí podrás ir apuntando los vídeos que quieres ver y dominar.
                 </p>
               ) : (
                 <div className="space-y-3 max-h-[260px] overflow-y-auto pr-1">
@@ -722,6 +662,76 @@ export default function Home() {
                 </div>
               )}
             </section>
+
+            {/* Capturas de pantalla */}
+            <section className="rounded-3xl border border-slate-800 bg-slate-900/70 p-5 shadow-[0_18px_35px_rgba(15,23,42,0.9)]">
+              <div className="flex items-center justify-between mb-3">
+                <h2 className="text-lg font-semibold text-slate-50">
+                  Capturas de pantalla 🖼️
+                </h2>
+                <span className="text-[11px] text-slate-400">
+                  {screenshots.length} captura(s)
+                </span>
+              </div>
+              <p className="text-xs text-slate-400 mb-3">
+                Guarda capturas de código, resultados o cualquier cosa
+                importante de tu día de estudio.
+              </p>
+
+              <div className="mb-4">
+                <label
+                  htmlFor="screenshot-input"
+                  className="inline-flex items-center justify-center rounded-2xl bg-amber-500 px-4 py-2 text-sm font-medium text-slate-950 shadow hover:bg-amber-400 hover:shadow-[0_10px_25px_rgba(245,158,11,0.35)] active:translate-y-[1px] transition cursor-pointer"
+                >
+                  Añadir captura
+                </label>
+                <input
+                  id="screenshot-input"
+                  type="file"
+                  accept="image/*"
+                  multiple
+                  className="hidden"
+                  onChange={handleScreenshotChange}
+                />
+              </div>
+
+              {screenshots.length === 0 ? (
+                <p className="text-sm text-slate-400">
+                  Cuando subas capturas, aparecerán aquí en forma de galería 📸
+                </p>
+              ) : (
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 max-h-[260px] overflow-y-auto pr-1">
+                  {screenshots.map((shot) => (
+                    <div
+                      key={shot.id}
+                      className="rounded-2xl border border-slate-800 bg-slate-950/70 p-2 flex flex-col gap-2"
+                    >
+                      <div className="relative w-full pb-[60%] overflow-hidden rounded-xl border border-slate-800 bg-slate-900">
+                        <img
+                          src={shot.dataUrl}
+                          alt={shot.name}
+                          className="absolute inset-0 h-full w-full object-cover"
+                        />
+                      </div>
+                      <div className="flex-1 flex flex-col">
+                        <p className="text-[11px] text-slate-100 truncate">
+                          {shot.name}
+                        </p>
+                        <p className="text-[10px] text-slate-500">
+                          {new Date(shot.createdAt).toLocaleString("es-ES")}
+                        </p>
+                        <button
+                          onClick={() => deleteScreenshot(shot.id)}
+                          className="mt-1 self-start text-[11px] text-slate-400 hover:text-red-400 transition"
+                        >
+                          Borrar
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </section>
           </div>
 
           {/* Columna derecha: tareas */}
@@ -736,8 +746,8 @@ export default function Home() {
                 </span>
               </div>
               <p className="text-xs text-slate-400 mb-3">
-                Divide tu día en pequeñas tareas. Cuantas más marques como hechas,
-                más satisfacción mental 💪
+                Divide tu día en pequeñas tareas. Cuantas más marques como
+                hechas, más satisfacción mental 💪
               </p>
               <div className="flex flex-col sm:flex-row gap-2 mb-4">
                 <input
@@ -799,7 +809,8 @@ export default function Home() {
         </div>
 
         <footer className="mt-4 text-[11px] text-slate-500 text-center">
-          Aprendizaje Squaads — tus avances se guardan en este navegador 💾
+          Aprendizaje Squaads — tu blog de progreso se guarda en este navegador
+          💾
         </footer>
       </div>
     </main>
