@@ -14,6 +14,7 @@ type Entry = {
   id: string;
   date: string; // YYYY-MM-DD
   notes: string;
+  hours?: number; // horas de estudio ese día
 };
 
 type VideoStatus = "to_watch" | "watched" | "mastered";
@@ -31,9 +32,14 @@ const VIDEO_STATUS_LABELS: Record<VideoStatus, string> = {
   mastered: "Visto y aprendido",
 };
 
+const VIDEO_STATUS_BADGE_CLASSES: Record<VideoStatus, string> = {
+  to_watch: "bg-amber-50 text-amber-700 border border-amber-200",
+  watched: "bg-sky-50 text-sky-700 border border-sky-200",
+  mastered: "bg-emerald-50 text-emerald-700 border border-emerald-200",
+};
+
 /* ---------- Helpers ---------- */
 
-// IDs sencillitos
 function createId() {
   return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
@@ -62,9 +68,215 @@ function useLocalStorage<T>(key: string, initial: T) {
   return [value, setValue] as const;
 }
 
+// exportar JSON
+function exportJSON(data: unknown) {
+  const blob = new Blob([JSON.stringify(data, null, 2)], {
+    type: "application/json",
+  });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `diario-aprendizaje-${new Date()
+    .toISOString()
+    .slice(0, 10)}.json`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+// exportar Markdown
+function exportMarkdown(entries: Entry[], tasks: Task[], videos: Video[]) {
+  const now = new Date();
+  const header = `# Diario de Aprendizaje Squaads
+
+Generado: ${now.toLocaleString("es-ES")}
+
+---
+
+`;
+
+  const entriesMd =
+    entries.length === 0
+      ? "_Sin entradas todavía._\n"
+      : entries
+          .slice()
+          .sort((a, b) => b.date.localeCompare(a.date))
+          .map((e) => {
+            const fecha = new Date(e.date).toLocaleDateString("es-ES");
+            const horas = e.hours ?? 0;
+            return `## ${fecha}
+
+**Horas de estudio:** ${horas}
+**Notas:**
+
+${e.notes}
+
+`;
+          })
+          .join("\n");
+
+  const tasksMd =
+    tasks.length === 0
+      ? "_Sin tareas registradas._\n"
+      : tasks
+          .map(
+            (t) =>
+              `- [${t.done ? "x" : " "}] ${t.text.trim() || "(sin descripción)"}`
+          )
+          .join("\n");
+
+  const videosMd =
+    videos.length === 0
+      ? "_Sin vídeos registrados._\n"
+      : videos
+          .map((v) => {
+            const estado = VIDEO_STATUS_LABELS[v.status];
+            const url = v.url || "(sin enlace)";
+            return `- **${v.title}**  
+  - Estado: ${estado}  
+  - Enlace: ${url}`;
+          })
+          .join("\n\n");
+
+  const full = `${header}## Entradas del diario
+
+${entriesMd}
+---
+
+## Tareas
+
+${tasksMd}
+
+---
+
+## Vídeos de estudio
+
+${videosMd}
+`;
+
+  const blob = new Blob([full], { type: "text/markdown" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `diario-aprendizaje-${new Date()
+    .toISOString()
+    .slice(0, 10)}.md`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+// “PDF” usando la impresión del navegador (Guardar como PDF)
+function exportPDF(entries: Entry[], tasks: Task[], videos: Video[]) {
+  if (typeof window === "undefined") return;
+
+  const sortedEntries = entries
+    .slice()
+    .sort((a, b) => b.date.localeCompare(a.date));
+
+  const htmlEntries =
+    sortedEntries.length === 0
+      ? "<p><em>Sin entradas todavía.</em></p>"
+      : sortedEntries
+          .map((e) => {
+            const fecha = new Date(e.date).toLocaleDateString("es-ES");
+            const horas = e.hours ?? 0;
+            return `
+            <section style="margin-bottom: 16px;">
+              <h2 style="font-size: 16px; margin: 0 0 4px;">${fecha}</h2>
+              <p style="margin: 0 0 4px;"><strong>Horas de estudio:</strong> ${horas}</p>
+              <pre style="white-space: pre-wrap; font-size: 12px; font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; margin: 0;">${e.notes}</pre>
+            </section>
+          `;
+          })
+          .join("");
+
+  const htmlTasks =
+    tasks.length === 0
+      ? "<p><em>Sin tareas registradas.</em></p>"
+      : `<ul>${tasks
+          .map(
+            (t) =>
+              `<li>[${t.done ? "x" : " "}] ${
+                t.text.trim() || "(sin descripción)"
+              }</li>`
+          )
+          .join("")}</ul>`;
+
+  const htmlVideos =
+    videos.length === 0
+      ? "<p><em>Sin vídeos registrados.</em></p>"
+      : `<ul>${videos
+          .map((v) => {
+            const estado = VIDEO_STATUS_LABELS[v.status];
+            const url = v.url || "(sin enlace)";
+            return `<li><strong>${v.title}</strong><br/>Estado: ${estado}<br/>Enlace: ${url}</li>`;
+          })
+          .join("")}</ul>`;
+
+  const win = window.open("", "_blank");
+  if (!win) return;
+
+  const docHtml = `
+  <!DOCTYPE html>
+  <html lang="es">
+    <head>
+      <meta charset="utf-8" />
+      <title>Diario de Aprendizaje Squaads</title>
+      <style>
+        body {
+          font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+          margin: 24px;
+          color: #0f172a;
+        }
+        h1 {
+          font-size: 24px;
+          margin-bottom: 4px;
+        }
+        h2 {
+          color: #0f172a;
+        }
+        h3 {
+          margin-top: 16px;
+        }
+        hr {
+          margin: 16px 0;
+          border: none;
+          border-top: 1px solid #e5e7eb;
+        }
+        small {
+          color: #6b7280;
+        }
+      </style>
+    </head>
+    <body>
+      <h1>Diario de Aprendizaje Squaads</h1>
+      <small>Generado: ${new Date().toLocaleString("es-ES")}</small>
+      <hr />
+      <h2>Entradas del diario</h2>
+      ${htmlEntries}
+      <hr />
+      <h2>Tareas</h2>
+      ${htmlTasks}
+      <hr />
+      <h2>Vídeos de estudio</h2>
+      ${htmlVideos}
+      <script>
+        window.onload = function () {
+          window.print();
+        }
+      </script>
+    </body>
+  </html>
+  `;
+
+  win.document.write(docHtml);
+  win.document.close();
+}
+
 /* ---------- Página principal ---------- */
 
 export default function Home() {
+  const today = new Date().toISOString().slice(0, 10);
+
   // tareas
   const [tasks, setTasks] = useLocalStorage<Task[]>(
     "aprendizaje-squaads-tasks",
@@ -77,8 +289,9 @@ export default function Home() {
     "aprendizaje-squaads-entries",
     []
   );
-  const today = new Date().toISOString().slice(0, 10);
+  const [selectedDate, setSelectedDate] = useState<string>(today);
   const [entryText, setEntryText] = useState("");
+  const [entryHours, setEntryHours] = useState<string>("");
 
   // vídeos
   const [videos, setVideos] = useLocalStorage<Video[]>(
@@ -88,6 +301,27 @@ export default function Home() {
   const [videoTitle, setVideoTitle] = useState("");
   const [videoUrl, setVideoUrl] = useState("");
   const [videoStatus, setVideoStatus] = useState<VideoStatus>("to_watch");
+
+  const completedTasks = tasks.filter((t) => t.done).length;
+  const pendingTasks = tasks.length - completedTasks;
+  const totalHours = entries.reduce((sum, e) => sum + (e.hours ?? 0), 0);
+
+  /* ----- cuando cambias de fecha, cargamos / limpiamos la entrada ----- */
+
+  useEffect(() => {
+    const entryForDay = entries.find((e) => e.date === selectedDate);
+    if (entryForDay) {
+      setEntryText(entryForDay.notes);
+      setEntryHours(
+        entryForDay.hours != null && entryForDay.hours !== 0
+          ? String(entryForDay.hours)
+          : ""
+      );
+    } else {
+      setEntryText("");
+      setEntryHours("");
+    }
+  }, [selectedDate, entries]);
 
   /* ----- acciones tareas ----- */
 
@@ -111,13 +345,24 @@ export default function Home() {
 
   /* ----- acciones diario ----- */
 
-  function addEntry() {
+  function saveEntry() {
     const notes = entryText.trim();
-    if (!notes) return;
-    const newEntry: Entry = { id: createId(), date: today, notes };
+    if (!notes && !entryHours.trim()) return;
+  
+    const hoursRaw = entryHours.replace(",", ".").trim();
+    const h = Number(hoursRaw);
+    const safeHours = !hoursRaw ? 0 : isNaN(h) || h < 0 ? 0 : h;
+  
+    const newEntry: Entry = {
+      id: createId(),          // SIEMPRE id nuevo
+      date: selectedDate,      // misma fecha, si quieres
+      notes,
+      hours: safeHours,
+    };
+  
     setEntries((prev) => [newEntry, ...prev]);
-    setEntryText("");
   }
+  
 
   function deleteEntry(id: string) {
     setEntries((prev) => prev.filter((e) => e.id !== id));
@@ -129,10 +374,8 @@ export default function Home() {
     const rawTitle = videoTitle.trim();
     const rawUrl = videoUrl.trim();
 
-    // si no hay ni título ni enlace, no hacemos nada
     if (!rawTitle && !rawUrl) return;
 
-    // si solo pegas el enlace, usamos el enlace como título
     const title = rawTitle || rawUrl || "Vídeo sin título";
 
     const newVideo: Video = {
@@ -158,46 +401,133 @@ export default function Home() {
     setVideos((prev) => prev.filter((v) => v.id !== id));
   }
 
+  /* ---------- UI ---------- */
+
   return (
-    <main className="min-h-screen bg-gradient-to-b from-slate-50 to-white text-slate-800 p-4 sm:p-8">
-      <div className="mx-auto max-w-5xl space-y-8">
+    <main className="min-h-screen bg-gradient-to-b from-slate-900 via-slate-950 to-slate-900 text-slate-50 px-4 py-6 sm:px-6 lg:px-8">
+      <div className="mx-auto max-w-6xl space-y-6">
         {/* Cabecera */}
-        <header className="space-y-2">
-          <h1 className="text-3xl sm:text-4xl font-bold tracking-tight">
-            Diario de Aprendizaje Squaads
-          </h1>
-          <p className="text-slate-500">
-            Un lugar para anotar lo que estudias, las tareas que cumples y los
-            vídeos que vas viendo.
-          </p>
+        <header className="rounded-3xl border border-slate-800 bg-gradient-to-r from-sky-500/10 via-emerald-500/10 to-purple-500/10 px-6 py-5 shadow-[0_18px_40px_rgba(15,23,42,0.7)] backdrop-blur">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-sky-300">
+                Squaads
+              </p>
+              <h1 className="mt-1 text-3xl sm:text-4xl font-bold tracking-tight text-slate-50">
+                Diario de Aprendizaje
+              </h1>
+              <p className="mt-2 text-sm text-slate-300">
+                Registra lo que estudias, marca tus objetivos y lleva control de
+                los vídeos que vas dominando.
+              </p>
+            </div>
+
+            <div className="flex flex-col gap-3">
+              <div className="rounded-2xl border border-slate-800 bg-slate-900/70 px-4 py-3 text-xs text-slate-300 shadow-inner">
+                <p className="font-semibold text-slate-100 mb-1">
+                  Resumen rápido
+                </p>
+                <p>
+                  ⏱️ Horas totales:{" "}
+                  <span className="font-semibold text-emerald-300">
+                    {totalHours.toFixed(1)} h
+                  </span>
+                </p>
+                <p>
+                  📌 Tareas:{" "}
+                  <span className="font-semibold text-sky-300">
+                    {completedTasks}/{tasks.length}
+                  </span>{" "}
+                  completadas
+                </p>
+                <p>
+                  🎞️ Vídeos aprendidos:{" "}
+                  <span className="font-semibold text-purple-300">
+                    {videos.filter((v) => v.status === "mastered").length}
+                  </span>
+                </p>
+              </div>
+
+              <div className="flex flex-wrap gap-2 justify-end">
+                <button
+                  onClick={() => exportMarkdown(entries, tasks, videos)}
+                  className="rounded-2xl border border-slate-700 bg-slate-900/80 px-3 py-2 text-xs font-medium text-slate-100 hover:border-sky-400 hover:text-sky-200 transition"
+                >
+                  Exportar Markdown
+                </button>
+                <button
+                  onClick={() =>
+                    exportJSON({
+                      entries,
+                      tasks,
+                      videos,
+                      exportedAt: new Date().toISOString(),
+                    })
+                  }
+                  className="rounded-2xl border border-slate-700 bg-slate-900/80 px-3 py-2 text-xs font-medium text-slate-100 hover:border-emerald-400 hover:text-emerald-200 transition"
+                >
+                  Exportar JSON
+                </button>
+                <button
+                  onClick={() => exportPDF(entries, tasks, videos)}
+                  className="rounded-2xl border border-slate-700 bg-slate-900/80 px-3 py-2 text-xs font-medium text-slate-100 hover:border-fuchsia-400 hover:text-fuchsia-200 transition"
+                >
+                  Exportar PDF
+                </button>
+              </div>
+            </div>
+          </div>
         </header>
 
-        <div className="grid gap-6 md:grid-cols-[1.2fr,1fr]">
+        <div className="grid gap-6 lg:grid-cols-[1.5fr,1.1fr]">
           {/* Columna izquierda: diario + vídeos */}
           <div className="space-y-6">
             {/* Diario del día */}
-            <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-              <h2 className="text-xl font-semibold mb-1">Entrada de hoy</h2>
-              <p className="text-xs text-slate-500 mb-3">
-                Escribe un pequeño resumen de lo que has estudiado y practicado
-                hoy.
-              </p>
-              <div className="mb-2 text-xs text-slate-500">
-                Fecha:{" "}
-                <span className="font-medium">
-                  {new Date(today).toLocaleDateString()}
+            <section className="rounded-3xl border border-slate-800 bg-slate-900/70 p-5 shadow-[0_18px_35px_rgba(15,23,42,0.9)]">
+              <div className="flex items-center justify-between gap-2 mb-3">
+                <h2 className="text-lg font-semibold text-slate-50">
+                  Entrada del día ✍️
+                </h2>
+                <span className="rounded-full border border-slate-700 bg-slate-800/70 px-3 py-1 text-[11px] font-medium uppercase tracking-wide text-slate-300">
+                  Reflect &amp; Learn
                 </span>
               </div>
+
+              <div className="mb-3 flex flex-wrap items-center gap-3 text-xs text-slate-400">
+                <span>
+                  📅 Fecha:{" "}
+                  <input
+                    type="date"
+                    className="ml-1 rounded-xl border border-slate-700 bg-slate-950/80 px-2 py-1 text-xs text-slate-100 outline-none focus:border-sky-400 focus:ring-1 focus:ring-sky-500/60"
+                    value={selectedDate}
+                    onChange={(e) => setSelectedDate(e.target.value)}
+                  />
+                </span>
+                <span>
+                  ⏱️ Horas:{" "}
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.5"
+                    className="ml-1 inline-flex w-20 rounded-xl border border-slate-700 bg-slate-950/80 px-2 py-1 text-xs text-slate-100 outline-none focus:border-emerald-400 focus:ring-1 focus:ring-emerald-500/60"
+                    placeholder="0"
+                    value={entryHours}
+                    onChange={(e) => setEntryHours(e.target.value)}
+                  />{" "}
+                  <span className="text-slate-500">h aprox</span>
+                </span>
+              </div>
+
               <textarea
-                className="w-full rounded-xl border border-slate-200 p-3 text-sm focus:outline-none focus:ring-2 focus:ring-sky-400 min-h-[120px]"
+                className="w-full rounded-2xl border border-slate-700 bg-slate-950/60 p-3 text-sm text-slate-100 shadow-inner outline-none transition focus:border-sky-400 focus:ring-2 focus:ring-sky-500/60 min-h-[120px]"
                 placeholder="Ejemplo: practiqué Node.js, hice un pequeño proyecto, repasé promesas y async/await..."
                 value={entryText}
                 onChange={(e) => setEntryText(e.target.value)}
               />
               <div className="mt-3 flex justify-end">
                 <button
-                  onClick={addEntry}
-                  className="rounded-xl bg-sky-600 px-4 py-2 text-sm font-medium text-white hover:bg-sky-700"
+                  onClick={saveEntry}
+                  className="inline-flex items-center justify-center rounded-2xl bg-sky-500 px-4 py-2 text-sm font-medium text-slate-950 shadow hover:bg-sky-400 hover:shadow-[0_10px_25px_rgba(56,189,248,0.35)] active:translate-y-[1px] transition"
                 >
                   Guardar entrada
                 </button>
@@ -205,67 +535,92 @@ export default function Home() {
             </section>
 
             {/* Historial de entradas */}
-            <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-              <h2 className="text-lg font-semibold mb-3">Historial de días</h2>
+            <section className="rounded-3xl border border-slate-800 bg-slate-900/70 p-5 shadow-[0_18px_35px_rgba(15,23,42,0.9)]">
+              <div className="flex items-center justify-between mb-3">
+                <h2 className="text-lg font-semibold text-slate-50">
+                  Historial de días 📚
+                </h2>
+                <span className="text-[11px] text-slate-400">
+                  {entries.length} entrada(s)
+                </span>
+              </div>
               {entries.length === 0 ? (
-                <p className="text-sm text-slate-500">
-                  Aún no tienes entradas guardadas. Escribe algo en “Entrada de
-                  hoy” y pulsa en “Guardar entrada”.
+                <p className="text-sm text-slate-400">
+                  Aún no tienes entradas guardadas. Escribe algo en “Entrada del
+                  día” y pulsa en <span className="font-semibold">Guardar</span>.
                 </p>
               ) : (
                 <div className="space-y-3 max-h-[260px] overflow-y-auto pr-1">
-                  {entries.map((entry) => (
-                    <div
-                      key={entry.id}
-                      className="rounded-xl border border-slate-100 bg-slate-50/80 p-3 text-sm"
-                    >
-                      <div className="flex items-center justify-between mb-1">
-                        <span className="font-medium text-slate-700">
-                          {new Date(entry.date).toLocaleDateString()}
-                        </span>
-                        <button
-                          onClick={() => deleteEntry(entry.id)}
-                          className="text-xs text-red-500 hover:text-red-600"
-                        >
-                          Borrar
-                        </button>
+                  {entries
+                    .slice()
+                    .sort((a, b) => b.date.localeCompare(a.date))
+                    .map((entry) => (
+                      <div
+                        key={entry.id}
+                        className="group rounded-2xl border border-slate-800 bg-slate-950/60 p-3 text-sm transition hover:border-sky-500/70 hover:bg-slate-900/90"
+                      >
+                        <div className="flex items-center justify-between mb-1">
+                          <button
+                            onClick={() => setSelectedDate(entry.date)}
+                            className="text-xs font-semibold text-sky-300 hover:underline"
+                          >
+                            {new Date(entry.date).toLocaleDateString("es-ES")}
+                          </button>
+                          <div className="flex items-center gap-3">
+                            <span className="text-[11px] text-emerald-300">
+                              {(entry.hours ?? 0).toFixed(1)} h
+                            </span>
+                            <button
+                              onClick={() => deleteEntry(entry.id)}
+                              className="text-[11px] text-slate-400 hover:text-red-400 transition"
+                            >
+                              Borrar
+                            </button>
+                          </div>
+                        </div>
+                        <p className="whitespace-pre-wrap text-slate-100 text-xs sm:text-sm">
+                          {entry.notes}
+                        </p>
                       </div>
-                      <p className="whitespace-pre-wrap text-slate-700">
-                        {entry.notes}
-                      </p>
-                    </div>
-                  ))}
+                    ))}
                 </div>
               )}
             </section>
 
             {/* Vídeos */}
-            <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-              <h2 className="text-lg font-semibold mb-3">Vídeos de estudio</h2>
+            <section className="rounded-3xl border border-slate-800 bg-slate-900/70 p-5 shadow-[0_18px_35px_rgba(15,23,42,0.9)]">
+              <div className="flex items-center justify-between mb-3">
+                <h2 className="text-lg font-semibold text-slate-50">
+                  Vídeos de estudio 🎥
+                </h2>
+                <span className="text-[11px] text-slate-400">
+                  {videos.length} vídeo(s)
+                </span>
+              </div>
 
               {/* Formulario para añadir vídeo */}
               <form
-                className="space-y-3 mb-4"
+                className="space-y-3 mb-5"
                 onSubmit={(e) => {
                   e.preventDefault();
                   addVideo();
                 }}
               >
                 <input
-                  className="w-full rounded-xl border border-slate-200 p-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-400"
+                  className="w-full rounded-2xl border border-slate-700 bg-slate-950/60 p-2.5 text-sm text-slate-100 shadow-inner outline-none transition focus:border-emerald-400 focus:ring-2 focus:ring-emerald-500/60"
                   placeholder="Título del vídeo (Ej. Curso básico de Node.js)"
                   value={videoTitle}
                   onChange={(e) => setVideoTitle(e.target.value)}
                 />
                 <input
-                  className="w-full rounded-xl border border-slate-200 p-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-400"
+                  className="w-full rounded-2xl border border-slate-700 bg-slate-950/60 p-2.5 text-sm text-slate-100 shadow-inner outline-none transition focus:border-emerald-400 focus:ring-2 focus:ring-emerald-500/60"
                   placeholder="Enlace (https://...)"
                   value={videoUrl}
                   onChange={(e) => setVideoUrl(e.target.value)}
                 />
                 <div className="flex flex-col sm:flex-row gap-2 items-start sm:items-center">
                   <select
-                    className="rounded-xl border border-slate-200 p-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-400"
+                    className="rounded-2xl border border-slate-700 bg-slate-950/80 px-3 py-2 text-sm text-slate-100 shadow-inner outline-none transition focus:border-emerald-400 focus:ring-2 focus:ring-emerald-500/60"
                     value={videoStatus}
                     onChange={(e) =>
                       setVideoStatus(e.target.value as VideoStatus)
@@ -277,7 +632,7 @@ export default function Home() {
                   </select>
                   <button
                     type="submit"
-                    className="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700"
+                    className="inline-flex items-center justify-center rounded-2xl bg-emerald-500 px-4 py-2 text-sm font-medium text-slate-950 shadow hover:bg-emerald-400 hover:shadow-[0_10px_25px_rgba(16,185,129,0.35)] active:translate-y-[1px] transition"
                   >
                     Añadir vídeo
                   </button>
@@ -286,14 +641,13 @@ export default function Home() {
 
               {/* Lista de vídeos */}
               {videos.length === 0 ? (
-                <p className="text-sm text-slate-500">
+                <p className="text-sm text-slate-400">
                   Aquí podrás ir apuntando los vídeos que te recomienda la
-                  empresa o que tú quieres ver.
+                  empresa o que tú quieres ver y dominar.
                 </p>
               ) : (
                 <div className="space-y-3 max-h-[260px] overflow-y-auto pr-1">
                   {videos.map((video) => {
-                    // aseguramos que el enlace tenga http/https
                     const href = video.url
                       ? video.url.startsWith("http")
                         ? video.url
@@ -303,11 +657,11 @@ export default function Home() {
                     return (
                       <div
                         key={video.id}
-                        className="rounded-xl border border-slate-100 bg-slate-50/80 p-3 text-sm"
+                        className="group rounded-2xl border border-slate-800 bg-slate-950/70 p-3 text-sm transition hover:border-emerald-500/70 hover:bg-slate-900/90"
                       >
-                        <div className="flex items-start justify-between gap-2 mb-1">
-                          <div>
-                            <p className="font-medium text-slate-800">
+                        <div className="flex items-start justify-between gap-2 mb-2">
+                          <div className="space-y-1">
+                            <p className="font-medium text-slate-50 text-sm">
                               {video.title}
                             </p>
                             {href ? (
@@ -315,29 +669,34 @@ export default function Home() {
                                 href={href}
                                 target="_blank"
                                 rel="noreferrer"
-                                className="text-xs text-sky-600 underline break-all"
+                                className="text-[11px] text-emerald-300 underline decoration-dotted underline-offset-2 break-all hover:text-emerald-200"
                               >
                                 Abrir vídeo · {href}
                               </a>
                             ) : (
-                              <p className="text-xs text-slate-400">
+                              <p className="text-xs text-slate-500">
                                 Sin enlace guardado para este vídeo.
                               </p>
                             )}
                           </div>
                           <button
                             onClick={() => deleteVideo(video.id)}
-                            className="text-xs text-red-500 hover:text-red-600"
+                            className="text-[11px] text-slate-400 hover:text-red-400 transition"
                           >
                             Borrar
                           </button>
                         </div>
-                        <div className="flex flex-col sm:flex-row gap-2 items-start sm:items-center">
-                          <span className="text-xs text-slate-500">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="text-[11px] text-slate-400">
                             Estado:
                           </span>
+                          <span
+                            className={`inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-medium ${VIDEO_STATUS_BADGE_CLASSES[video.status]}`}
+                          >
+                            {VIDEO_STATUS_LABELS[video.status]}
+                          </span>
                           <select
-                            className="rounded-lg border border-slate-200 p-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-sky-400"
+                            className="ml-auto rounded-xl border border-slate-700 bg-slate-950/80 px-2 py-1 text-[11px] text-slate-100 outline-none focus:border-emerald-400 focus:ring-1 focus:ring-emerald-500/60"
                             value={video.status}
                             onChange={(e) =>
                               changeVideoStatus(
@@ -367,16 +726,22 @@ export default function Home() {
 
           {/* Columna derecha: tareas */}
           <div className="space-y-6">
-            <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-              <h2 className="text-lg font-semibold mb-2">
-                Tareas y objetivos del día
-              </h2>
-              <p className="text-xs text-slate-500 mb-3">
-                Añade pequeñas tareas que quieras cumplir hoy (o esta semana).
+            <section className="rounded-3xl border border-slate-800 bg-slate-900/70 p-5 shadow-[0_18px_35px_rgba(15,23,42,0.9)]">
+              <div className="flex items-center justify-between mb-3">
+                <h2 className="text-lg font-semibold text-slate-50">
+                  Tareas y objetivos del día ✅
+                </h2>
+                <span className="text-[11px] text-slate-400">
+                  {tasks.length} tarea(s)
+                </span>
+              </div>
+              <p className="text-xs text-slate-400 mb-3">
+                Divide tu día en pequeñas tareas. Cuantas más marques como hechas,
+                más satisfacción mental 💪
               </p>
               <div className="flex flex-col sm:flex-row gap-2 mb-4">
                 <input
-                  className="flex-1 rounded-xl border border-slate-200 p-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-400"
+                  className="flex-1 rounded-2xl border border-slate-700 bg-slate-950/60 p-2.5 text-sm text-slate-100 shadow-inner outline-none transition focus:border-sky-400 focus:ring-2 focus:ring-sky-500/60"
                   placeholder="Ej. Hacer 30 minutos de práctica con Node.js"
                   value={newTaskText}
                   onChange={(e) => setNewTaskText(e.target.value)}
@@ -384,27 +749,27 @@ export default function Home() {
                 />
                 <button
                   onClick={addTask}
-                  className="rounded-xl bg-sky-600 px-4 py-2 text-sm font-medium text-white hover:bg-sky-700"
+                  className="inline-flex items-center justify-center rounded-2xl bg-sky-500 px-4 py-2 text-sm font-medium text-slate-950 shadow hover:bg-sky-400 hover:shadow-[0_10px_25px_rgba(56,189,248,0.35)] active:translate-y-[1px] transition"
                 >
                   Añadir tarea
                 </button>
               </div>
 
               {tasks.length === 0 ? (
-                <p className="text-sm text-slate-500">
+                <p className="text-sm text-slate-400">
                   Cuando añadas tareas, aparecerán aquí para que puedas
                   marcarlas como completadas ✅
                 </p>
               ) : (
-                <ul className="space-y-2 max-h-[320px] overflow-y-auto pr-1">
+                <ul className="space-y-2 max-h-[380px] overflow-y-auto pr-1">
                   {tasks.map((task) => (
                     <li
                       key={task.id}
-                      className="flex items-start gap-2 rounded-xl border border-slate-100 bg-slate-50/80 p-2 text-sm"
+                      className="flex items-start gap-3 rounded-2xl border border-slate-800 bg-slate-950/70 p-2.5 text-sm transition hover:border-sky-500/60 hover:bg-slate-900/90"
                     >
                       <input
                         type="checkbox"
-                        className="mt-1 h-4 w-4"
+                        className="mt-1 h-4 w-4 rounded border-slate-600 bg-slate-950 text-sky-400 focus:ring-sky-500"
                         checked={task.done}
                         onChange={() => toggleTask(task.id)}
                       />
@@ -412,8 +777,8 @@ export default function Home() {
                         <p
                           className={
                             task.done
-                              ? "text-slate-400 line-through"
-                              : "text-slate-700"
+                              ? "text-slate-500 line-through"
+                              : "text-slate-100"
                           }
                         >
                           {task.text}
@@ -421,7 +786,7 @@ export default function Home() {
                       </div>
                       <button
                         onClick={() => deleteTask(task.id)}
-                        className="text-xs text-red-500 hover:text-red-600"
+                        className="text-[11px] text-slate-400 hover:text-red-400 transition"
                       >
                         Borrar
                       </button>
@@ -433,7 +798,7 @@ export default function Home() {
           </div>
         </div>
 
-        <footer className="text-xs text-slate-400 text-center pt-4">
+        <footer className="mt-4 text-[11px] text-slate-500 text-center">
           Aprendizaje Squaads — tus avances se guardan en este navegador 💾
         </footer>
       </div>
