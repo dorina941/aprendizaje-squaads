@@ -1,5 +1,6 @@
 "use client";
 
+
 import { useState, useEffect, ChangeEvent } from "react";
 
 /* ---------- Tipos ---------- */
@@ -50,21 +51,28 @@ const VIDEO_STATUS_BADGE_CLASSES: Record<VideoStatus, string> = {
 function createId() {
   return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
-
-// Hook para usar localStorage
+// Hook para usar localStorage SIN romper la hidratación
 function useLocalStorage<T>(key: string, initial: T) {
-  const [value, setValue] = useState<T>(() => {
-    if (typeof window === "undefined") return initial;
-    try {
-      const stored = window.localStorage.getItem(key);
-      return stored ? (JSON.parse(stored) as T) : initial;
-    } catch {
-      return initial;
-    }
-  });
+  const [value, setValue] = useState<T>(initial);
 
+  // 1) Al montar en el cliente, leemos de localStorage
   useEffect(() => {
     if (typeof window === "undefined") return;
+
+    try {
+      const stored = window.localStorage.getItem(key);
+      if (stored) {
+        setValue(JSON.parse(stored) as T);
+      }
+    } catch {
+      // si falla, nos quedamos con initial
+    }
+  }, [key]);
+
+  // 2) Cada vez que cambie `value`, lo guardamos
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+
     try {
       window.localStorage.setItem(key, JSON.stringify(value));
     } catch {
@@ -74,6 +82,7 @@ function useLocalStorage<T>(key: string, initial: T) {
 
   return [value, setValue] as const;
 }
+
 
 // “PDF” usando la impresión del navegador (Guardar como PDF)
 function exportPDF(
