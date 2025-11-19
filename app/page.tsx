@@ -152,7 +152,7 @@ export default function HomePage() {
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
                 placeholder="Buscar por palabras..."
-                className="w-full rounded-full border border-slate-700/70 bg-black/40 backdrop-blur-sm py-1.5 pl-7 pr-3 text-xs text-slate-100 placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-yellow-400/70 shadow-md shadow-black/40"
+                className="w-full rounded-full border border-slate-700/70 bg-black/40 backdrop-blur-sm py-1.5 pl-7 pr-3 text-xs text-slate-100 placeholder:text-slate-300 focus:outline-none focus:ring-2 focus:ring-yellow-400/70 shadow-md shadow-black/40"
               />
             </div>
             {searchTerm && (
@@ -231,8 +231,8 @@ export default function HomePage() {
                     <span className="text-[28px] text-[#FFD700]">⭐</span>
                   ) : (
                     // 📚 Día sin completar
-                    <span className="text-[10px] text-[
-#75E1FF] opacity-100 text-center leading-tight">
+                    <span className="text-[10px] text-
+[#75E1FF] opacity-100 text-center leading-tight">
                       ¿Qué aprendiste hoy?
                     </span>
 
