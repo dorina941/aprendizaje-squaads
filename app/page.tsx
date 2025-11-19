@@ -231,7 +231,8 @@ export default function HomePage() {
                     <span className="text-[28px] text-[#FFD700]">⭐</span>
                   ) : (
                     // 📚 Día sin completar
-                    <span className="text-[10px] text-[#00F2FF] opacity-100 text-center leading-tight">
+                    <span className="text-[10px] text-[
+#75E1FF] opacity-100 text-center leading-tight">
                       ¿Qué aprendiste hoy?
                     </span>
 
