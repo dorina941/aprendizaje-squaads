@@ -192,7 +192,7 @@ export default function HomePage() {
             </button>
           </div>
 
-          <div className="grid grid-cols-7 text-center text-xs text-slate-400 mb-2">
+          <div className="grid grid-cols-7 text-center text-xs text-slate-100 mb-2">
             <div>L</div>
             <div>M</div>
             <div>X</div>
@@ -225,11 +225,18 @@ export default function HomePage() {
                   ].join(" ")}
                 >
                   <span className="font-semibold">{dayNumber}</span>
-                  {hasData && (
-                    <span className="text-[10px] text-black">
-                      Dia completado
+
+                  {hasData ? (
+                    // ⭐ Día completado
+                    <span className="text-[28px] text-[#FFD700]">⭐</span>
+                  ) : (
+                    // 📚 Día sin completar
+                    <span className="text-[10px] text-[#00F2FF] opacity-100 text-center leading-tight">
+                      ¿Qué aprendiste hoy?
                     </span>
+
                   )}
+
                 </button>
               );
             })}
